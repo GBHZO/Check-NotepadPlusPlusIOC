@@ -4,7 +4,29 @@ Intune Remediations detection script: exit 1 if IOC found; exit 0 if clean.
 Scans ALL local user profiles for %APPDATA%-style IOCs (because Intune usually runs as SYSTEM).
 #>
 
+$LogDir  = 'C:\ProgramData\NppIOC\logs'
+$LogFile = Join-Path $LogDir 'Detect-NotepadPlusPlusIOC.log'
+
+function Ensure-Dir([string]$Path) {
+    if (-not (Test-Path $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+function Log {
+    param(
+        [Parameter(Mandatory=$true)][string]$Message,
+        [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO'
+    )
+
+    Ensure-Dir $LogDir
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
+    Add-Content -Path $LogFile -Value $line -Encoding UTF8
+}
+
 $ErrorActionPreference = 'SilentlyContinue'
+
+Log "=== Starting Notepad++ IOC Detection (running as: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)) ==="
 
 # -----------------------------
 # CONFIG (align with your repo)
@@ -76,7 +98,10 @@ function Add-Finding {
     Value  = $PathOrValue
     Detail = $Details
   }) | Out-Null
+
+  Log "FINDING: Type=$Type Value=$PathOrValue Details=$Details" 'WARN'
 }
+
 
 # -----------------------------
 # Scan
@@ -191,8 +216,12 @@ if ($Findings.Count -gt 0) {
   } | ConvertTo-Json -Depth 6
 
   Write-Output $out
+  Log "IntuneOutput(JSON): $out"
+  Log "Detection result: IOC_FOUND ($($Findings.Count) findings)" 'WARN'
   exit 1
-} else {
+} 
+else {
   Write-Output '{"Result":"CLEAN","Count":0}'
+  Log "Detection result: CLEAN" 'INFO'
   exit 0
 }

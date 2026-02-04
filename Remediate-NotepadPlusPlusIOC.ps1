@@ -4,7 +4,44 @@ Intune Remediations remediation script: runs when detection exits 1. [1](https:/
 Quarantines suspicious artifacts rather than deleting.
 #>
 
+$LogDir  = 'C:\ProgramData\NppIOC\logs'
+$LogFile = Join-Path $LogDir 'Remediate-NotepadPlusPlusIOC.log'
+
+function Ensure-Dir([string]$Path) {
+    if (-not (Test-Path $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+function Log {
+    param(
+        [Parameter(Mandatory=$true)][string]$Message,
+        [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO'
+    )
+    Ensure-Dir $LogDir
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Level, $Message
+    Add-Content -Path $LogFile -Value $line -Encoding UTF8
+}
+
+function Rotate-LogIfNeeded {
+    param([int]$MaxMB = 5)
+
+    try {
+        if (Test-Path $LogFile) {
+            $sizeMB = (Get-Item $LogFile).Length / 1MB
+            if ($sizeMB -ge $MaxMB) {
+                $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+                $arch  = Join-Path $LogDir ("{0}.{1}.log" -f ([IO.Path]::GetFileNameWithoutExtension($LogFile)), $stamp)
+                Move-Item -Path $LogFile -Destination $arch -Force
+            }
+        }
+    } catch { }
+}
+
 $ErrorActionPreference = 'SilentlyContinue'
+
+Rotate-LogIfNeeded -MaxMB 5
+Log "=== Starting Notepad++ IOC Remediation (running as: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)) ==="
 
 # -----------------------------
 # CONFIG (keep in sync with detection)
@@ -33,11 +70,6 @@ $LogPath        = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\NppIO
 # -----------------------------
 # Helpers
 # -----------------------------
-function Log {
-  param([string]$msg)
-  $line = "{0} {1}" -f (Get-Date -Format 's'), $msg
-  Add-Content -Path $LogPath -Value $line -Encoding UTF8
-}
 
 function Get-UserProfilePaths {
   $paths = @()
@@ -81,7 +113,7 @@ function Quarantine-Item {
       Copy-Item -Path $Path -Destination $dest -Recurse -Force
       Remove-Item -Path $Path -Recurse -Force
     } catch {
-      Log "FAILED to quarantine: $Path ; $_"
+      Log "FAILED to quarantine: $Path ; $_" 'ERROR'
     }
   }
 }
@@ -98,7 +130,7 @@ try {
   foreach ($pname in $SuspiciousProcessNames) {
     $procs = Get-Process -Name $pname -ErrorAction SilentlyContinue
     foreach ($p in $procs) {
-      Log "Stopping process: $($p.ProcessName) PID=$($p.Id)"
+      Log "Stopping process: $($p.ProcessName) PID=$($p.Id)" 'INFO'
       try { Stop-Process -Id $p.Id -Force } catch { Log "Failed stopping PID=$($p.Id): $_" }
     }
   }
